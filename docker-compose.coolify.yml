@@ -1,0 +1,134 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [qrcb-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks: [qrcb-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    command: server /data --address ":9000" --console-address ":9001"
+    environment:
+      RUSTFS_ROOT_USER: ${MINIO_ROOT_USER}
+      RUSTFS_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - rustfs-data:/data
+    networks: [qrcb-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rustfs-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_DEFAULT_REGION: ${MINIO_REGION}
+    volumes:
+      - ./minio/public-read-policy.json:/policy.json:ro
+      - ./minio/cors.json:/cors.json:ro
+    entrypoint: >
+      /bin/sh -c "
+        aws --endpoint-url http://rustfs:9000 s3 mb s3://qrcb-public || true;
+        aws --endpoint-url http://rustfs:9000 s3 mb s3://qrcb-private || true;
+        aws --endpoint-url http://rustfs:9000 s3api put-bucket-policy --bucket qrcb-public --policy file:///policy.json || true;
+        aws --endpoint-url http://rustfs:9000 s3api put-bucket-cors --bucket qrcb-public --cors-configuration file:///cors.json || true;
+        aws --endpoint-url http://rustfs:9000 s3api put-bucket-cors --bucket qrcb-private --cors-configuration file:///cors.json || true;
+        echo 'RustFS ready';
+      "
+    networks: [qrcb-net]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${PORT}
+      HOST: ${HOST}
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      ADMIN_REDIS_URL: ${ADMIN_REDIS_URL}
+      PUBLIC_JWT_SECRET: ${PUBLIC_JWT_SECRET}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL}
+      QR_SIGNING_SECRET: ${QR_SIGNING_SECRET}
+      QR_BASE_URL: ${QR_BASE_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      MAIL_FROM: ${MAIL_FROM}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
+      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_PORT: ${MINIO_PORT}
+      MINIO_USE_SSL: ${MINIO_USE_SSL}
+      MINIO_REGION: ${MINIO_REGION}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_PUBLIC: ${MINIO_BUCKET_PUBLIC}
+      MINIO_BUCKET_PRIVATE: ${MINIO_BUCKET_PRIVATE}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL}
+      CORS_PUBLIC_ORIGIN: ${CORS_PUBLIC_ORIGIN}
+      CORS_ADMIN_ORIGIN: ${CORS_ADMIN_ORIGIN}
+      CASHBACK_AMOUNT: ${CASHBACK_AMOUNT}
+      MIN_WITHDRAWAL: ${MIN_WITHDRAWAL}
+      SCAN_RATE_LIMIT: ${SCAN_RATE_LIMIT}
+      SCAN_LOCKOUT_MINUTES: ${SCAN_LOCKOUT_MINUTES}
+      OTP_TTL_MINUTES: ${OTP_TTL_MINUTES}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS}
+      DEV_AUTO_DISPATCH: ${DEV_AUTO_DISPATCH}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    networks: [qrcb-net]
+
+volumes:
+  pgdata:
+  redis-data:
+  rustfs-data:
+
+networks:
+  qrcb-net:
+    driver: bridge
