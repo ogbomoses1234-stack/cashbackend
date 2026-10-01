@@ -2,7 +2,7 @@
   "name": "qrcashback-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "QR CashBack Connect — Backend API",
+  "description": "QR CashBack Connect \u2014 Backend API",
   "main": "dist/server.js",
   "type": "commonjs",
   "engines": {
@@ -34,7 +34,7 @@
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/express-serve-static-core": "^4.17.41",
+    "@types/express-serve-static-core": "4.17.41",
     "@types/helmet": "^0.0.48",
     "@types/jest": "^29.5.13",
     "@types/jsonwebtoken": "^9.0.7",
@@ -55,9 +55,6 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"
-  },
-  "overrides": {
-    "@types/express-serve-static-core": "4.17.41"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
