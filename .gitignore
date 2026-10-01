@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — NEVER commit these
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Prisma local DBs
+prisma/*.db
+prisma/migrations/dev.db*
+
+# Backups
+backups/
+
+# Uploads temp
+uploads-tmp/*
+!uploads-tmp/.gitkeep
+
+# SSL certs
+nginx/ssl/*.pem
+nginx/ssl/*.key
+!nginx/ssl/.gitkeep
+
+# Certbot webroot
+nginx/certbot-webroot/
+
+# Local docker volumes (if any)
+.local/

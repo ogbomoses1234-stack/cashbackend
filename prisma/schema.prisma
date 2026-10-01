@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════
+
+enum Role {
+  customer
+  staff
+  admin
+}
+
+enum SerialStatus {
+  Created
+  Dispatched
+  Redeemed
+  Disputed
+}
+
+enum OrderStatus {
+  Processing
+  Shipped
+  Delivered
+  Flagged
+  Cancelled
+}
+
+enum PaymentMethod {
+  bank_transfer
+  pod
+}
+
+enum TransactionType {
+  cashback_credit
+  withdrawal_debit
+  withdrawal_reversal
+  admin_adjustment
+}
+
+enum WithdrawalStatus {
+  pending
+  approved
+  declined
+}
+
+enum ChatStatus {
+  open
+  awaiting_admin
+  awaiting_customer
+  closed
+}
+
+enum DisputeStatus {
+  open
+  investigating
+  resolved
+  rejected
+}
+
+enum OtpPurpose {
+  signup
+  login
+  admin_login
+  password_reset
+}
+
+enum ScanType {
+  staff_dispatch
+  customer_redeem
+}
+
+// ═══════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════
+
+model AuthUser {
+  id             String    @id @default(uuid())
+  email          String    @unique @db.VarChar(160)
+  passwordHash   String    @map("password_hash") @db.VarChar(255)
+  lastLoginAt    DateTime? @map("last_login_at")
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  profile   UserProfile?
+  otpTokens OtpToken[]
+
+  @@map("auth_users")
+}
+
+model OtpToken {
+  id         String     @id @default(uuid())
+  userId     String     @map("user_id")
+  codeHash   String     @map("code_hash") @db.VarChar(255)
+  purpose    OtpPurpose
+  expiresAt  DateTime   @map("expires_at")
+  consumedAt DateTime?  @map("consumed_at")
+  attempts   Int        @default(0)
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  user AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("otp_tokens")
+}
+
+// ═══════════════════════════════════════════
+// USERS
+// ═══════════════════════════════════════════
+
+model UserProfile {
+  id                 String   @id @default(uuid())
+  authUserId         String   @unique @map("auth_user_id")
+  role               Role     @default(customer)
+  fullName           String?  @map("full_name") @db.VarChar(120)
+  email              String   @unique @db.VarChar(160)
+  phoneNumber        String?  @unique @map("phone_number") @db.VarChar(15)
+  deliveryAddress    String?  @map("delivery_address")
+  payoutBankCode       String?   @map("payout_bank_code") @db.VarChar(10)
+  payoutAccountNumber  String?   @map("payout_account_number") @db.VarChar(10)
+  payoutAccountName    String?   @map("payout_account_name") @db.VarChar(120)
+  walletBalance      Decimal  @default(0.00) @map("wallet_balance") @db.Decimal(14, 2)
+  pendingBalance     Decimal  @default(0.00) @map("pending_balance") @db.Decimal(14, 2)
+  totalEarned        Decimal  @default(0.00) @map("total_earned") @db.Decimal(14, 2)
+  emailVerified      Boolean  @default(false) @map("email_verified")
+  isActive           Boolean  @default(true) @map("is_active")
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  salesPoint         String?  @map("sales_point") @db.VarChar(120)
+  staffCode          String?  @unique @map("staff_code") @db.VarChar(20)
+  deactivatedReason  String?  @map("deactivated_reason")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  authUser     AuthUser            @relation(fields: [authUserId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  transactions Transaction[]
+  withdrawals  WithdrawalRequest[]
+  devices      UserDevice[]
+  chatThreads  ChatThread[]
+  chatMessages ChatMessage[]
+  disputes     DisputeReport[]
+  dispatched   ProductSerial[]     @relation("DispatchedBy")
+  redeemed     ProductSerial[]     @relation("RedeemedBy")
+  CartItem     CartItem[]
+
+  @@index([role])
+  @@map("users_profile")
+}
+
+model UserDevice {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  fingerprintHash String   @map("fingerprint_hash") @db.VarChar(64)
+  ipAddress       String?  @map("ip_address")
+  userAgent       String?  @map("user_agent")
+  blocked         Boolean  @default(false)
+  lastSeenAt      DateTime @default(now()) @map("last_seen_at")
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprintHash])
+  @@index([fingerprintHash])
+  @@map("user_devices")
+}
+
+// ═══════════════════════════════════════════
+// PRODUCTS & SERIALS
+// ═══════════════════════════════════════════
+
+model Product {
+  id           String   @id @default(uuid())
+  title        String   @db.VarChar(160)
+  slug         String   @unique @db.VarChar(180)
+  description  String?
+  price        Decimal  @db.Decimal(12, 2)
+  thumbnailUrl String?  @map("thumbnail_url")
+  category     String?  @db.VarChar(60)
+  stockCount   Int      @default(0) @map("stock_count")
+  isActive     Boolean  @default(true) @map("is_active")
+  isFeatured   Boolean   @default(false) @map("is_featured")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  serials    ProductSerial[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@map("products")
+}
+
+model ProductSerial {
+  serialNumber String       @id @map("serial_number") @db.VarChar(24)
+  productId    String       @map("product_id")
+  status       SerialStatus @default(Created)
+  batchId      String?      @map("batch_id")
+  qrSignature  String       @map("qr_signature") @db.VarChar(64)
+  dispatchedBy String?      @map("dispatched_by")
+  dispatchedAt DateTime?    @map("dispatched_at")
+  redeemedBy   String?      @map("redeemed_by")
+  redeemedAt   DateTime?    @map("redeemed_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  dispatcher UserProfile?    @relation("DispatchedBy", fields: [dispatchedBy], references: [id])
+  redeemer   UserProfile?    @relation("RedeemedBy", fields: [redeemedBy], references: [id])
+  scanLogs   SerialScanLog[]
+
+  @@index([status])
+  @@index([productId])
+  @@index([batchId])
+  @@index([dispatchedBy])
+  @@index([redeemedBy])
+  @@map("product_serials")
+  scanEvents ScanEvent[]
+}
+
+model SerialScanLog {
+  id           String   @id @default(uuid())
+  serialNumber String   @map("serial_number") @db.VarChar(24)
+  scannedBy    String   @map("scanned_by")
+  scanType     ScanType @map("scan_type")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  geoLat       Decimal? @map("geo_lat") @db.Decimal(9, 6)
+  geoLng       Decimal? @map("geo_lng") @db.Decimal(9, 6)
+  scannedAt    DateTime @default(now()) @map("scanned_at")
+
+  serial ProductSerial @relation(fields: [serialNumber], references: [serialNumber], onDelete: Cascade)
+
+  @@index([serialNumber])
+  @@index([scannedBy])
+  @@map("serial_scan_logs")
+}
+
+// ═══════════════════════════════════════════
+// ORDERS & CART
+// ═══════════════════════════════════════════
+
+model Order {
+  id               String        @id @default(uuid())
+  orderNumber      String        @unique @map("order_number") @db.VarChar(20)
+  userId           String        @map("user_id")
+  totalAmount      Decimal       @map("total_amount") @db.Decimal(12, 2)
+  status           OrderStatus   @default(Processing)
+  paymentMethod    PaymentMethod @map("payment_method")
+  receiptObjectKey String?       @map("receipt_object_key")
+  deliveryAddress  String        @map("delivery_address")
+  flagReason       String?       @map("flag_reason")
+  flaggedAt        DateTime?     @map("flagged_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  user  UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String  @map("order_id")
+  productId String  @map("product_id")
+  quantity  Int
+  unitPrice Decimal @map("unit_price") @db.Decimal(12, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  productId String   @map("product_id")
+  quantity  Int
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  user    UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("cart_items")
+}
+
+// ═══════════════════════════════════════════
+// WALLET & WITHDRAWALS
+// ═══════════════════════════════════════════
+
+model Transaction {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  type      TransactionType
+  amount    Decimal         @db.Decimal(12, 2)
+  reference String?         @db.VarChar(64)
+  metadata  Json?
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@map("transactions")
+}
+
+model WithdrawalRequest {
+  id            String           @id @default(uuid())
+  userId        String           @map("user_id")
+  amount        Decimal          @db.Decimal(12, 2)
+  bankCode      String           @map("bank_code") @db.VarChar(10)
+  accountNumber String           @map("account_number") @db.VarChar(10)
+  accountName   String           @map("account_name") @db.VarChar(120)
+  status        WithdrawalStatus @default(pending)
+  declineReason String?          @map("decline_reason")
+  payoutRef     String?          @map("payout_ref")
+  processedBy   String?          @map("processed_by")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("withdrawal_requests")
+}
+
+// ═══════════════════════════════════════════
+// CHAT
+// ═══════════════════════════════════════════
+
+model ChatThread {
+  id            String     @id @default(uuid())
+  customerId    String     @map("customer_id")
+  subject       String     @db.VarChar(200)
+  status        ChatStatus @default(awaiting_admin)
+  lastMessageAt DateTime   @default(now()) @map("last_message_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+
+  customer UserProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([customerId])
+  @@index([status])
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id            String    @id @default(uuid())
+  threadId      String    @map("thread_id")
+  senderId      String    @map("sender_id")
+  senderRole    Role
+  body          String
+  attachmentKey String?   @map("attachment_key")
+  readAt        DateTime? @map("read_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  thread ChatThread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender UserProfile @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@map("chat_messages")
+}
+
+// ═══════════════════════════════════════════
+// DISPUTES
+// ═══════════════════════════════════════════
+
+model DisputeReport {
+  id             String        @id @default(uuid())
+  userId         String        @map("user_id")
+  serialNumber   String        @map("serial_number") @db.VarChar(24)
+  photoObjectKey String?       @map("photo_object_key")
+  description    String
+  status         DisputeStatus @default(open)
+  adminNote      String?       @map("admin_note")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("dispute_reports")
+}
+
+// ═══════════════════════════════════════════
+// AUDIT LOG
+// ═══════════════════════════════════════════
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorId     String?  @map("actor_id")
+  actorRole   Role?    @map("actor_role")
+  event       String   @db.VarChar(80)
+  entityType  String?  @map("entity_type") @db.VarChar(60)
+  entityId    String?  @map("entity_id")
+  ipAddress   String?  @map("ip_address")
+  fingerprint String?  @db.VarChar(64)
+  details     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([event])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ═══════════════════════════════════════════
+// SYSTEM SETTINGS
+// ═══════════════════════════════════════════
+
+model SystemSetting {
+  key       String   @id @db.VarChar(80)
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+
+// ═══════════════════════════════════════════
+// BANNERS
+// ═══════════════════════════════════════════
+
+model Banner {
+  id         String   @id @default(uuid())
+  imageUrl   String   @map("image_url")
+  headline   String   @db.VarChar(160)
+  subtext    String?  @db.VarChar(280)
+  ctaText    String?  @map("cta_text") @db.VarChar(60)
+  ctaUrl     String?  @map("cta_url") @db.VarChar(300)
+  sortOrder  Int      @default(0) @map("sort_order")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive, sortOrder])
+  @@map("banners")
+}
+
+
+// ═══════════════════════════════════════════
+// SCAN EVENTS — full audit trail of every scan attempt
+// ═══════════════════════════════════════════
+
+model ScanEvent {
+  id           String   @id @default(uuid())
+  serialNumber String   @map("serial_number") @db.VarChar(24)
+  userId       String?  @map("user_id")
+  userRole     String?  @map("user_role") @db.VarChar(20)
+  scanType     String   @map("scan_type") @db.VarChar(40)
+  success      Boolean  @default(true)
+  errorCode    String?  @map("error_code") @db.VarChar(60)
+  errorMessage String?  @map("error_message")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  geoLat       Decimal? @map("geo_lat") @db.Decimal(9, 6)
+  geoLng       Decimal? @map("geo_lng") @db.Decimal(9, 6)
+  scannedAt    DateTime @default(now()) @map("scanned_at")
+
+  serial ProductSerial @relation(fields: [serialNumber], references: [serialNumber], onDelete: Cascade)
+
+  @@index([serialNumber])
+  @@index([userId])
+  @@index([scannedAt])
+  @@index([scanType])
+  @@map("scan_events")
+}

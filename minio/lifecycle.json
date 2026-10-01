@@ -1,0 +1,28 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-orphaned-receipts",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "receipts/" },
+      "Expiration": { "Days": 730 }
+    },
+    {
+      "ID": "expire-dispute-evidence",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "disputes/" },
+      "Expiration": { "Days": 1825 }
+    },
+    {
+      "ID": "expire-qr-archives",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "qr-archives/" },
+      "Expiration": { "Days": 90 }
+    },
+    {
+      "ID": "expire-chat-attachments",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "chat-attachments/" },
+      "Expiration": { "Days": 365 }
+    }
+  ]
+}
