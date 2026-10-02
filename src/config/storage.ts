@@ -2,6 +2,10 @@ import { Client as MinioClient } from 'minio';
 import { config } from './index';
 import { logger } from './logger';
 
+/**
+ * Internal client — talks to RustFS inside the Docker network.
+ * Used for: makeBucket, statObject, putObject, removeObject, listObjects.
+ */
 export const minio = new MinioClient({
   endPoint: config.minio.endpoint,
   port: config.minio.port,
@@ -10,6 +14,25 @@ export const minio = new MinioClient({
   secretKey: config.minio.secretKey,
   region: config.minio.region,
 });
+
+/**
+ * Public client — used ONLY for generating presigned URLs.
+ * The endpoint matches the public URL the browser will hit.
+ *
+ * The browser gets: https://<public-host>/<bucket>/<key>?X-Amz-Signature=...
+ * The signature was computed with that exact host, so it validates.
+ */
+export const minioPublic = new MinioClient({
+  endPoint: config.minio.publicEndpoint.host,
+  port: config.minio.publicEndpoint.port,
+  useSSL: config.minio.publicEndpoint.ssl,
+  accessKey: config.minio.accessKey,
+  secretKey: config.minio.secretKey,
+  region: config.minio.region,
+});
+
+logger.info('📦 MinIO internal endpoint: ' + config.minio.endpoint + ':' + config.minio.port);
+logger.info('📦 MinIO public endpoint:   ' + (config.minio.publicEndpoint.ssl ? 'https' : 'http') + '://' + config.minio.publicEndpoint.host + ':' + config.minio.publicEndpoint.port);
 
 export const BUCKETS = config.minio.buckets;
 

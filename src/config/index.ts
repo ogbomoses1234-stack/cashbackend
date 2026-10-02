@@ -115,6 +115,14 @@ export const config = {
     },
     publicUrl: parsed.data.MINIO_PUBLIC_URL,
     serverUrl: parsed.data.MINIO_SERVER_URL,
+    publicEndpoint: (() => {
+      try {
+        const u = new URL(parsed.data.MINIO_SERVER_URL || parsed.data.MINIO_PUBLIC_URL);
+        return { host: u.hostname, port: parseInt(u.port || (u.protocol === 'https:' ? '443' : '80'), 10), ssl: u.protocol === 'https:' };
+      } catch {
+        return { host: parsed.data.MINIO_ENDPOINT, port: parseInt(parsed.data.MINIO_PORT, 10), ssl: parsed.data.MINIO_USE_SSL === 'true' };
+      }
+    })(),
   },
 
   cors: {

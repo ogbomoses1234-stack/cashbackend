@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { minio, BUCKETS, PRESIGNED_URL_TTL } from '../config/storage';
+import { minio, minioPublic, BUCKETS, PRESIGNED_URL_TTL } from '../config/storage';
 import { ApiError } from '../utils/ApiError';
 import { logger } from '../config/logger';
 
@@ -15,7 +15,7 @@ export class StorageService {
     expiresIn?: number;
   }) {
     try {
-      const url = await minio.presignedPutObject(
+      const url = await minioPublic.presignedPutObject(
         this.bucketName(params.bucket),
         params.objectKey,
         params.expiresIn ?? PRESIGNED_URL_TTL.UPLOAD
@@ -37,7 +37,7 @@ export class StorageService {
     expiresIn?: number;
   }): Promise<string> {
     try {
-      return await minio.presignedGetObject(
+      return await minioPublic.presignedGetObject(
         this.bucketName(params.bucket),
         params.objectKey,
         params.expiresIn ?? PRESIGNED_URL_TTL.DOWNLOAD_SHORT
