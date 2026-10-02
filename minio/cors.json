@@ -2,14 +2,14 @@
   "CORSRules": [
     {
       "AllowedOrigins": [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "https://yourdomain.com",
-        "https://admin.yourdomain.com"
+        "https://rapusb1ntl5v2hc2gh9a7wfs.149.102.136.125.sslip.io",
+        "https://md998hlxzjb7iwpxp8df2hgf.149.102.136.125.sslip.io",
+        "http://rapusb1ntl5v2hc2gh9a7wfs.149.102.136.125.sslip.io",
+        "http://md998hlxzjb7iwpxp8df2hgf.149.102.136.125.sslip.io"
       ],
-      "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+      "AllowedMethods": ["GET", "HEAD", "PUT", "POST", "DELETE"],
       "AllowedHeaders": ["*"],
-      "ExposeHeaders": ["ETag"],
+      "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
       "MaxAgeSeconds": 3000
     }
   ]
