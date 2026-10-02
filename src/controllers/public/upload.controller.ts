@@ -8,7 +8,8 @@ import { ApiError } from '../../utils/ApiError';
 import { redis } from '../../config/redis';
 
 export const requestPresign = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user) throw ApiError.unauthorized();
+  const user = (req as any).user || (req as any).admin;
+  if (!user) throw ApiError.unauthorized();
   const { purpose, mimeType, sizeBytes, scope } = req.body;
 
   if (!UPLOAD_RULES.ALLOWED_MIME.includes(mimeType)) {
@@ -25,7 +26,7 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
     avatar: 3,
     product: 20,
   };
-  const rlKey = `upload_rate:${req.user.sub}:${purpose}:${Math.floor(Date.now() / 3600000)}`;
+  const rlKey = `upload_rate:${user.sub}:${purpose}:${Math.floor(Date.now() / 3600000)}`;
   const count = await redis.incr(rlKey);
   await redis.expire(rlKey, 3600);
   if (count > limitMap[purpose]) {
@@ -41,11 +42,11 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
   switch (purpose) {
     case 'receipt':
       namespace = MEDIA_NAMESPACES.RECEIPTS;
-      keyScope = [req.user.sub, scope?.orderId || 'unsorted'];
+      keyScope = [user.sub, scope?.orderId || 'unsorted'];
       break;
     case 'dispute':
       namespace = MEDIA_NAMESPACES.DISPUTES;
-      keyScope = [req.user.sub, scope?.disputeId || 'unsorted'];
+      keyScope = [user.sub, scope?.disputeId || 'unsorted'];
       break;
     case 'chat':
       namespace = MEDIA_NAMESPACES.CHAT;
@@ -59,7 +60,7 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
     case 'avatar':
       bucket = 'public';
       namespace = MEDIA_NAMESPACES.AVATARS;
-      keyScope = [req.user.sub];
+      keyScope = [user.sub];
       break;
   }
 
@@ -76,7 +77,7 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
   });
 
   await redis.set(
-    `pending_upload:${req.user.sub}:${objectKey}`,
+    `pending_upload:${user.sub}:${objectKey}`,
     JSON.stringify({ purpose, mimeType, sizeBytes, bucket, ts: Date.now() }),
     'EX',
     600
@@ -86,10 +87,11 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const commitUpload = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user) throw ApiError.unauthorized();
+  const user = (req as any).user || (req as any).admin;
+  if (!user) throw ApiError.unauthorized();
   const { objectKey } = req.body;
 
-  const pendingRaw = await redis.get(`pending_upload:${req.user.sub}:${objectKey}`);
+  const pendingRaw = await redis.get(`pending_upload:${user.sub}:${objectKey}`);
   if (!pendingRaw) {
     throw ApiError.badRequest('UPLOAD_NOT_PENDING', 'Upload session expired or invalid');
   }
@@ -101,7 +103,7 @@ export const commitUpload = asyncHandler(async (req: Request, res: Response) => 
     throw ApiError.badRequest('UPLOAD_TOO_LARGE', 'Uploaded file exceeds size limit');
   }
 
-  await redis.del(`pending_upload:${req.user.sub}:${objectKey}`);
+  await redis.del(`pending_upload:${user.sub}:${objectKey}`);
 
   return ApiResponse.success(res, {
     objectKey,
@@ -112,12 +114,13 @@ export const commitUpload = asyncHandler(async (req: Request, res: Response) => 
 });
 
 export const getSignedUrl = asyncHandler(async (req: Request, res: Response) => {
-  if (!req.user) throw ApiError.unauthorized();
+  const user = (req as any).user || (req as any).admin;
+  if (!user) throw ApiError.unauthorized();
   const objectKey = decodeURIComponent(req.params.objectKey);
   const longLived = req.query.longLived === 'true';
 
-  const isOwner = objectKey.includes(`/${req.user.sub}/`);
-  if (!isOwner && req.user.role !== 'admin') throw ApiError.forbidden();
+  const isOwner = objectKey.includes(`/${user.sub}/`);
+  if (!isOwner && user.role !== 'admin') throw ApiError.forbidden();
 
   const url = await StorageService.getDownloadUrl({
     bucket: 'private',

@@ -14,6 +14,7 @@ import chatRoutes from './chat.routes';
 import disputeRoutes from './dispute.routes';
 import logRoutes from './log.routes';
 import settingsRoutes from './settings.routes';
+import uploadRoutes from './upload.routes';
 
 const router = Router();
 
@@ -35,5 +36,6 @@ router.use('/chats', chatRoutes);
 router.use('/disputes', disputeRoutes);
 router.use('/logs', logRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/uploads', uploadRoutes);
 
 export default router;

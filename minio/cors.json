@@ -3,9 +3,7 @@
     {
       "AllowedOrigins": [
         "https://rapusb1ntl5v2hc2gh9a7wfs.149.102.136.125.sslip.io",
-        "https://md998hlxzjb7iwpxp8df2hgf.149.102.136.125.sslip.io",
-        "http://rapusb1ntl5v2hc2gh9a7wfs.149.102.136.125.sslip.io",
-        "http://md998hlxzjb7iwpxp8df2hgf.149.102.136.125.sslip.io"
+        "https://md998hlxzjb7iwpxp8df2hgf.149.102.136.125.sslip.io"
       ],
       "AllowedMethods": ["GET", "HEAD", "PUT", "POST", "DELETE"],
       "AllowedHeaders": ["*"],
