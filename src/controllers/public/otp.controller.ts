@@ -29,7 +29,7 @@ export const verifySignupOtp = asyncHandler(async (req: Request, res: Response) 
 
   return ApiResponse.success(
     res,
-    { verified: true, user: session.user },
+    { verified: true, user: session.user, accessToken: session.accessToken },
     'Email verified'
   );
 });

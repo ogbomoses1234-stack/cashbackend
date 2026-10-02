@@ -48,3 +48,18 @@ nginx/certbot-webroot/
 
 # Local docker volumes (if any)
 .local/
+
+# Dev scripts (local only, don't commit)
+fix_*.py
+fix_*.sh
+apply_*.py
+diagnose_*.py
+nuke_and_rebuild.py
+boot.sh
+smoke.sh
+test_banners.sh
+
+# Backup files
+*.bak
+*.save
+*.old

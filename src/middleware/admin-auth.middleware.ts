@@ -13,7 +13,11 @@ function clientIp(req: Request): string {
 
 export async function adminAuthenticate(req: Request, _res: Response, next: NextFunction) {
   try {
-    const token = req.cookies?.adminAccessToken;
+    const token =
+    req.cookies?.adminAccessToken ||
+    (req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : null);
     if (!token) throw ApiError.unauthorized('ADMIN_AUTH_REQUIRED', 'Admin auth required');
 
     const payload = jwt.verify(token, config.jwt.adminSecret) as AdminPayload;
