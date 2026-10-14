@@ -35,6 +35,7 @@ services:
     environment:
       RUSTFS_ROOT_USER: ${MINIO_ROOT_USER}
       RUSTFS_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      SERVICE_FQDN_RUSTFS_9000: files.vickkyaku.store
     volumes:
       - rustfs-data:/data
     expose:
@@ -119,6 +120,7 @@ services:
       OTP_TTL_MINUTES: ${OTP_TTL_MINUTES}
       OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS}
       DEV_AUTO_DISPATCH: ${DEV_AUTO_DISPATCH}
+      SERVICE_FQDN_API_5001: api.vickkyaku.store
     depends_on:
       postgres:
         condition: service_healthy
