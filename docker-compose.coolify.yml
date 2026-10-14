@@ -37,7 +37,14 @@ services:
       RUSTFS_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - rustfs-data:/data
-    networks: [qrcb-net]
+    expose:
+      - "9000"
+    networks:
+      - qrcb-net
+      - coolify
+    labels:
+      - "traefik.docker.network=coolify"
+      - "traefik.http.services.rustfs.loadbalancer.server.port=9000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 10s
@@ -122,7 +129,14 @@ services:
         condition: service_healthy
       rustfs:
         condition: service_healthy
-    networks: [qrcb-net]
+    expose:
+      - "5001"
+    networks:
+      - qrcb-net
+      - coolify
+    labels:
+      - "traefik.docker.network=coolify"
+      - "traefik.http.services.api.loadbalancer.server.port=5001"
 
 volumes:
   pgdata:
@@ -132,3 +146,5 @@ volumes:
 networks:
   qrcb-net:
     driver: bridge
+  coolify:
+    external: true
