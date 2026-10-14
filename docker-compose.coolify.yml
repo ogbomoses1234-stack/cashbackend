@@ -42,9 +42,6 @@ services:
     networks:
       - qrcb-net
       - coolify
-    labels:
-      - "traefik.docker.network=coolify"
-      - "traefik.http.services.rustfs.loadbalancer.server.port=9000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 10s
@@ -134,9 +131,6 @@ services:
     networks:
       - qrcb-net
       - coolify
-    labels:
-      - "traefik.docker.network=coolify"
-      - "traefik.http.services.api.loadbalancer.server.port=5001"
 
 volumes:
   pgdata:
