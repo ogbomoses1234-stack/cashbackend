@@ -4,6 +4,39 @@ import { z } from 'zod';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
+/* ═══════════════════════════════════════════════════════════
+   TTL SANITIZER
+   jsonwebtoken requires either a number of seconds ("900") or a
+   timespan string like "15m", "1h", "7d". Coolify/env editors
+   sometimes leave trailing whitespace, wrapping quotes, or
+   inline comments. This normalizes the value and falls back to a
+   safe default when the input can't be salvaged.
+═══════════════════════════════════════════════════════════ */
+function sanitizeTtl(raw: unknown, fallback: string): string {
+  const cleaned = String(raw ?? '')
+    .trim()                          // strip leading/trailing whitespace
+    .replace(/^["']|["']$/g, '')     // strip matching quotes
+    .replace(/\s.*$/, '');           // drop anything after a space (inline comment)
+
+  /* Pure integer seconds: "900", "60" */
+  if (/^\d+$/.test(cleaned)) return cleaned;
+
+  /* Timespan string: "15m", "1h", "7d", "2w", "1y" */
+  if (/^\d+(s|m|h|d|w|y)$/i.test(cleaned)) return cleaned;
+
+  /* Anything else — log a warning and use the fallback */
+  if (cleaned && process.env.NODE_ENV !== 'test') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `⚠️  Invalid JWT TTL value "${raw}" — falling back to "${fallback}"`
+    );
+  }
+  return fallback;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENV SCHEMA
+═══════════════════════════════════════════════════════════ */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.string().default('5000'),
@@ -62,6 +95,9 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+/* ═══════════════════════════════════════════════════════════
+   EXPORTED CONFIG
+═══════════════════════════════════════════════════════════ */
 export const config = {
   env: parsed.data.NODE_ENV,
   port: parseInt(parsed.data.PORT, 10),
@@ -82,8 +118,9 @@ export const config = {
   jwt: {
     publicSecret: parsed.data.PUBLIC_JWT_SECRET,
     adminSecret: parsed.data.ADMIN_JWT_SECRET,
-    accessTtl: parsed.data.JWT_ACCESS_TTL,
-    refreshTtl: parsed.data.JWT_REFRESH_TTL,
+    /* ── Sanitized: never trust the raw env value ───────── */
+    accessTtl: sanitizeTtl(parsed.data.JWT_ACCESS_TTL, '15m'),
+    refreshTtl: sanitizeTtl(parsed.data.JWT_REFRESH_TTL, '7d'),
   },
 
   qr: {
@@ -118,9 +155,17 @@ export const config = {
     publicEndpoint: (() => {
       try {
         const u = new URL(parsed.data.MINIO_SERVER_URL || parsed.data.MINIO_PUBLIC_URL);
-        return { host: u.hostname, port: parseInt(u.port || (u.protocol === 'https:' ? '443' : '80'), 10), ssl: u.protocol === 'https:' };
+        return {
+          host: u.hostname,
+          port: parseInt(u.port || (u.protocol === 'https:' ? '443' : '80'), 10),
+          ssl: u.protocol === 'https:',
+        };
       } catch {
-        return { host: parsed.data.MINIO_ENDPOINT, port: parseInt(parsed.data.MINIO_PORT, 10), ssl: parsed.data.MINIO_USE_SSL === 'true' };
+        return {
+          host: parsed.data.MINIO_ENDPOINT,
+          port: parseInt(parsed.data.MINIO_PORT, 10),
+          ssl: parsed.data.MINIO_USE_SSL === 'true',
+        };
       }
     })(),
   },
