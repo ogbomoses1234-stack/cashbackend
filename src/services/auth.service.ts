@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { prisma } from '../config/database';
 import { PasswordService } from './password.service';
 import { OtpService } from './otp.service';
@@ -5,9 +6,35 @@ import { EmailService } from './email.service';
 import { TokenService } from './token.service';
 import { ApiError } from '../utils/ApiError';
 import { normalizeNgPhone } from '../utils/phoneFormat';
+import { hashRefreshToken } from '../utils/hashRefreshToken';
+import { logger } from '../config/logger';
 import { LOGIN_MAX_FAILED_ATTEMPTS, LOGIN_LOCKOUT_MINUTES } from '../config/constants';
 
+/* ═══════════════════════════════════════════════════
+   Constants
+═══════════════════════════════════════════════════ */
+const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/* ═══════════════════════════════════════════════════
+   Session shape returned to controllers
+═══════════════════════════════════════════════════ */
+export interface SessionResult {
+  accessToken: string;
+  refreshToken: string;
+  user: {
+    id: string;
+    email: string;
+    role: string;
+    fullName: string | null;
+    emailVerified: boolean;
+    mustChangePassword: boolean;
+  };
+}
+
 export class AuthService {
+  /* ═══════════════════════════════════════════════════
+     SIGNUP
+  ═══════════════════════════════════════════════════ */
   static async signup(opts: { email: string; password: string }) {
     const email = opts.email.toLowerCase().trim();
 
@@ -27,9 +54,7 @@ export class AuthService {
       data: {
         email,
         passwordHash,
-        profile: {
-          create: { email, role: 'customer' },
-        },
+        profile: { create: { email, role: 'customer' } },
       },
     });
 
@@ -57,13 +82,16 @@ export class AuthService {
     return { verified: true };
   }
 
+  /* ═══════════════════════════════════════════════════
+     LOGIN
+  ═══════════════════════════════════════════════════ */
   static async login(opts: {
     email: string;
     password: string;
     fingerprintHash?: string;
     ip: string;
     userAgent?: string;
-  }) {
+  }): Promise<SessionResult> {
     const email = opts.email.toLowerCase().trim();
     const authUser = await prisma.authUser.findUnique({
       where: { email },
@@ -126,29 +154,221 @@ export class AuthService {
       });
     }
 
-    const accessToken = TokenService.signPublicAccessToken({
+    return this.issueSession({
       userId: authUser.profile.id,
       authId: authUser.id,
       role: authUser.profile.role as any,
+      ip: opts.ip,
+      userAgent: opts.userAgent,
+    });
+  }
+
+  /**
+   * Auto-login after OTP verification.
+   * Returns the user + tokens — the controller sets cookies.
+   */
+  static async issueSessionAfterSignup(opts: {
+    email: string;
+    ip?: string;
+    userAgent?: string;
+  }): Promise<SessionResult> {
+    const email = opts.email.toLowerCase().trim();
+    const authUser = await prisma.authUser.findUnique({
+      where: { email },
+      include: { profile: true },
+    });
+    if (!authUser?.profile) {
+      throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
+    }
+
+    return this.issueSession({
+      userId: authUser.profile.id,
+      authId: authUser.id,
+      role: authUser.profile.role as any,
+      ip: opts.ip ?? '',
+      userAgent: opts.userAgent,
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════
+     CORE — issue a fresh session (access + refresh)
+  ═══════════════════════════════════════════════════ */
+  static async issueSession(opts: {
+    userId: string;
+    authId: string;
+    role: string;
+    ip: string;
+    userAgent?: string;
+  }): Promise<SessionResult> {
+    const accessToken = TokenService.signPublicAccessToken({
+      userId: opts.userId,
+      authId: opts.authId,
+      role: opts.role as any,
+    });
+
+    const jti = randomUUID();
+    const familyId = randomUUID();
+    const refreshToken = TokenService.signPublicRefreshToken({
+      userId: opts.userId,
+      jti,
+      familyId,
+    });
+
+    await prisma.refreshToken.create({
+      data: {
+        userId: opts.userId,
+        tokenHash: hashRefreshToken(refreshToken),
+        familyId,
+        userAgent: opts.userAgent,
+        ipAddress: opts.ip,
+        expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+      },
+    });
+
+    const profile = await prisma.userProfile.findUniqueOrThrow({
+      where: { id: opts.userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        fullName: true,
+        emailVerified: true,
+        mustChangePassword: true,
+      },
+    });
+
+    return { accessToken, refreshToken, user: profile };
+  }
+
+  /* ═══════════════════════════════════════════════════
+     REFRESH — rotate token, issue new access
+  ═══════════════════════════════════════════════════ */
+  static async refreshSession(opts: {
+    refreshToken: string;
+    ip: string;
+    userAgent?: string;
+  }): Promise<SessionResult> {
+    const payload = TokenService.verifyPublicRefreshToken(opts.refreshToken);
+    if (!payload) {
+      throw ApiError.unauthorized('REFRESH_INVALID', 'Session expired. Please log in again.');
+    }
+
+    const hash = hashRefreshToken(opts.refreshToken);
+    const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
+
+    /* ─── Unknown token → could be forged ─── */
+    if (!stored) {
+      logger.warn('refresh: token not found in DB', { familyId: payload.familyId });
+      await prisma.refreshToken.updateMany({
+        where: { familyId: payload.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw ApiError.unauthorized('REFRESH_INVALID', 'Session expired. Please log in again.');
+    }
+
+    /* ─── Reuse detection — token was already rotated ─── */
+    if (stored.revokedAt) {
+      logger.warn('refresh: reuse detected — killing family', {
+        familyId: stored.familyId,
+        userId: stored.userId,
+      });
+      await prisma.refreshToken.updateMany({
+        where: { familyId: stored.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw ApiError.unauthorized('REFRESH_REUSED', 'Session revoked for security. Log in again.');
+    }
+
+    /* ─── Expiry check (defensive — JWT already checked) ─── */
+    if (stored.expiresAt < new Date()) {
+      throw ApiError.unauthorized('REFRESH_EXPIRED', 'Session expired. Please log in again.');
+    }
+
+    /* ─── User still active? ─── */
+    const profile = await prisma.userProfile.findUnique({
+      where: { id: stored.userId },
+    });
+    if (!profile) {
+      throw ApiError.unauthorized('USER_NOT_FOUND', 'Account not found');
+    }
+    if (!profile.isActive) {
+      throw ApiError.forbidden('AUTH_ACCOUNT_DEACTIVATED', 'Account suspended');
+    }
+
+    /* ─── Rotate: revoke old, issue new in same family ─── */
+    const newJti = randomUUID();
+    const newRefreshToken = TokenService.signPublicRefreshToken({
+      userId: profile.id,
+      jti: newJti,
+      familyId: stored.familyId,
+    });
+    const newHash = hashRefreshToken(newRefreshToken);
+
+    await prisma.$transaction([
+      prisma.refreshToken.update({
+        where: { id: stored.id },
+        data: { revokedAt: new Date(), replacedBy: newJti },
+      }),
+      prisma.refreshToken.create({
+        data: {
+          userId: profile.id,
+          tokenHash: newHash,
+          familyId: stored.familyId,
+          userAgent: opts.userAgent,
+          ipAddress: opts.ip,
+          expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+        },
+      }),
+    ]);
+
+    const accessToken = TokenService.signPublicAccessToken({
+      userId: profile.id,
+      authId: profile.authUserId,
+      role: profile.role as any,
     });
 
     return {
       accessToken,
+      refreshToken: newRefreshToken,
       user: {
-        id: authUser.profile.id,
-        email: authUser.profile.email,
-        role: authUser.profile.role,
-        fullName: authUser.profile.fullName,
-        emailVerified: authUser.profile.emailVerified,
-        mustChangePassword: authUser.profile.mustChangePassword,
+        id: profile.id,
+        email: profile.email,
+        role: profile.role,
+        fullName: profile.fullName,
+        emailVerified: profile.emailVerified,
+        mustChangePassword: profile.mustChangePassword,
       },
     };
   }
 
+  /* ═══════════════════════════════════════════════════
+     LOGOUT — revoke access + current refresh family
+  ═══════════════════════════════════════════════════ */
+  static async logout(opts: { jti?: string; refreshToken?: string }) {
+    if (opts.jti) {
+      await TokenService.revokePublic(opts.jti, 900);
+    }
+
+    if (opts.refreshToken) {
+      const hash = hashRefreshToken(opts.refreshToken);
+      const stored = await prisma.refreshToken.findUnique({ where: { tokenHash: hash } });
+      if (stored) {
+        await prisma.refreshToken.updateMany({
+          where: { familyId: stored.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+    }
+
+    return { loggedOut: true };
+  }
+
+  /* ═══════════════════════════════════════════════════
+     OTP / PROFILE
+  ═══════════════════════════════════════════════════ */
   static async resendOtp(email: string, purpose: 'signup' | 'password_reset' = 'signup') {
     const authUser = await prisma.authUser.findUnique({ where: { email: email.toLowerCase() } });
-    if (!authUser) return { sent: true }; // prevent email enumeration
-
+    if (!authUser) return { sent: true };
     const code = await OtpService.issue(authUser.id, purpose);
     await EmailService.sendOtp(authUser.email, code, purpose);
     return { sent: true };
@@ -161,21 +381,14 @@ export class AuthService {
     deliveryAddress: string;
   }) {
     const { userId } = opts;
-
     const fullName = opts.fullName.trim();
     const deliveryAddress = opts.deliveryAddress.trim();
 
-    if (fullName.length < 3) {
-      throw ApiError.badRequest('PROFILE_INVALID_NAME', 'Full name is too short');
-    }
-    if (deliveryAddress.length < 10) {
-      throw ApiError.badRequest('PROFILE_INVALID_ADDRESS', 'Address is too short');
-    }
+    if (fullName.length < 3) throw ApiError.badRequest('PROFILE_INVALID_NAME', 'Full name is too short');
+    if (deliveryAddress.length < 10) throw ApiError.badRequest('PROFILE_INVALID_ADDRESS', 'Address is too short');
 
     const normalized = normalizeNgPhone(opts.phoneNumber);
-    if (!normalized) {
-      throw ApiError.badRequest('PROFILE_INVALID_PHONE', 'Enter a valid Nigerian phone number');
-    }
+    if (!normalized) throw ApiError.badRequest('PROFILE_INVALID_PHONE', 'Enter a valid Nigerian phone number');
 
     const conflict = await prisma.userProfile.findFirst({
       where: { phoneNumber: normalized, NOT: { id: userId } },
@@ -188,16 +401,9 @@ export class AuthService {
     });
   }
 
-  static async logout(jti: string) {
-    await TokenService.revokePublic(jti, 900);
-    return { loggedOut: true };
-  }
-
-  /**
-   * Change password for any authenticated user (customer, staff, admin).
-   * Verifies the old password, validates the new one, updates the hash,
-   * and clears `mustChangePassword`.
-   */
+  /* ═══════════════════════════════════════════════════
+     CHANGE PASSWORD — nukes ALL sessions (security)
+  ═══════════════════════════════════════════════════ */
   static async changePassword(opts: {
     userId: string;
     currentPassword: string;
@@ -209,16 +415,8 @@ export class AuthService {
     });
     if (!profile) throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
 
-    const ok = await PasswordService.verify(
-      opts.currentPassword,
-      profile.authUser.passwordHash
-    );
-    if (!ok) {
-      throw ApiError.badRequest(
-        'AUTH_INVALID_CREDENTIALS',
-        'Current password is incorrect'
-      );
-    }
+    const ok = await PasswordService.verify(opts.currentPassword, profile.authUser.passwordHash);
+    if (!ok) throw ApiError.badRequest('AUTH_INVALID_CREDENTIALS', 'Current password is incorrect');
 
     if (!PasswordService.isStrong(opts.newPassword)) {
       throw ApiError.badRequest(
@@ -228,10 +426,7 @@ export class AuthService {
     }
 
     if (opts.currentPassword === opts.newPassword) {
-      throw ApiError.badRequest(
-        'AUTH_SAME_PASSWORD',
-        'New password must be different from the current one'
-      );
+      throw ApiError.badRequest('AUTH_SAME_PASSWORD', 'New password must be different from the current one');
     }
 
     const newHash = await PasswordService.hash(opts.newPassword);
@@ -245,42 +440,12 @@ export class AuthService {
         where: { id: opts.userId },
         data: { mustChangePassword: false },
       }),
+      prisma.refreshToken.updateMany({
+        where: { userId: opts.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
     ]);
 
     return { changed: true };
-  }
-
-  /**
-   * Auto-login after OTP verification.
-   * Returns the user + access token — the controller sets the cookie.
-   * The frontend never has to store the password client-side.
-   */
-  static async issueSessionAfterSignup(opts: { email: string }) {
-    const email = opts.email.toLowerCase().trim();
-    const authUser = await prisma.authUser.findUnique({
-      where: { email },
-      include: { profile: true },
-    });
-    if (!authUser?.profile) {
-      throw ApiError.notFound('USER_NOT_FOUND', 'User not found');
-    }
-
-    const token = TokenService.signPublicAccessToken({
-      userId: authUser.profile.id,
-      authId: authUser.id,
-      role: authUser.profile.role as any,
-    });
-
-    return {
-      accessToken: token,
-      user: {
-        id: authUser.profile.id,
-        email: authUser.profile.email,
-        role: authUser.profile.role,
-        fullName: authUser.profile.fullName,
-        emailVerified: authUser.profile.emailVerified,
-        mustChangePassword: authUser.profile.mustChangePassword,
-      },
-    };
   }
 }

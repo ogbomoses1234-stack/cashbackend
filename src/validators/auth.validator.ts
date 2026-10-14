@@ -63,3 +63,24 @@ export const changePasswordSchema = z.object({
       .regex(/[^A-Za-z0-9]/, 'Must contain a symbol'),
   }),
 });
+export const adminRefreshSchema = z.object({
+  body: z
+    .object({
+      refreshToken: z.string().optional(),
+    })
+    .optional()
+    .default({}),
+});
+/* ═══════════════════════════════════════════════════
+   REFRESH TOKEN
+   Body is optional — production uses httpOnly cookie,
+   dev/cross-domain sends refreshToken in the body.
+═══════════════════════════════════════════════════ */
+export const refreshSchema = z.object({
+  body: z
+    .object({
+      refreshToken: z.string().optional(),
+    })
+    .optional()
+    .default({}),
+});

@@ -103,4 +103,30 @@ export class EmailService {
     `;
     await this.send(params.to, subject, html);
   }
+
+  static async sendPackageStatus(to: string, reference: string, status: string) {
+    const label = status.replace('_', ' ');
+    await this.send(
+      to,
+      `Your package #${reference} is now ${label}`,
+      `<p>Update on your special-order list <b>#${reference}</b>: the status is now <b>${label}</b>.</p>`
+    );
+  }
+
+  static async sendPackageEditDecision(
+    to: string,
+    reference: string,
+    decision: 'approved' | 'denied'
+  ) {
+    await this.send(
+      to,
+      decision === 'approved'
+        ? `Edit approved for #${reference}`
+        : `Edit request declined for #${reference}`,
+      decision === 'approved'
+        ? `<p>Your edit request for <b>#${reference}</b> was approved. You can now update the list.</p>`
+        : `<p>Your edit request for <b>#${reference}</b> was declined. Check the chat for details.</p>`
+    );
+  }
+
 }

@@ -25,6 +25,7 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
     chat: UPLOAD_RULES.CHAT_ATTACHMENT_MAX_PER_HOUR,
     avatar: 3,
     product: 20,
+    package: 20,
   };
   const rlKey = `upload_rate:${user.sub}:${purpose}:${Math.floor(Date.now() / 3600000)}`;
   const count = await redis.incr(rlKey);
@@ -56,6 +57,10 @@ export const requestPresign = asyncHandler(async (req: Request, res: Response) =
       bucket = 'public';
       namespace = MEDIA_NAMESPACES.PRODUCTS;
       keyScope = [scope?.productId || 'unsorted'];
+      break;
+    case 'package':
+      namespace = MEDIA_NAMESPACES.PACKAGE_ITEMS;
+      keyScope = [user.sub, scope?.packageId || 'unsorted'];
       break;
     case 'avatar':
       bucket = 'public';

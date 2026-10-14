@@ -2,7 +2,11 @@ import { Router } from 'express';
 import { validate } from '../../middleware/validate.middleware';
 import { adminAuthenticate } from '../../middleware/admin-auth.middleware';
 import { rateLimit } from '../../middleware/rateLimit.middleware';
-import { adminLoginSchema, adminVerifyOtpSchema } from '../../validators/auth.validator';
+import {
+  adminLoginSchema,
+  adminVerifyOtpSchema,
+  adminRefreshSchema,
+} from '../../validators/auth.validator';
 import * as adminAuthController from '../../controllers/admin/auth.controller';
 
 const router = Router();
@@ -20,7 +24,13 @@ router.post(
   validate(adminVerifyOtpSchema),
   adminAuthController.verifyOtp
 );
-router.post('/logout', adminAuthenticate, adminAuthController.logout);
+
+/* Public refresh — no auth (that's the whole point) */
+router.post('/refresh', validate(adminRefreshSchema), adminAuthController.refresh);
+
+/* Logout accepts optional auth — revokes whatever it can */
+router.post('/logout', adminAuthController.logout);
+
 router.get('/me', adminAuthenticate, adminAuthController.me);
 
 export default router;

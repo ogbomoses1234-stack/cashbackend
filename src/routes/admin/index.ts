@@ -15,6 +15,7 @@ import disputeRoutes from './dispute.routes';
 import logRoutes from './log.routes';
 import settingsRoutes from './settings.routes';
 import uploadRoutes from './upload.routes';
+import packageRoutes from './package.routes';
 
 const router = Router();
 
@@ -37,5 +38,6 @@ router.use('/disputes', disputeRoutes);
 router.use('/logs', logRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/uploads', uploadRoutes);
+router.use('/packages', packageRoutes);
 
 export default router;

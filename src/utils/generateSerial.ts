@@ -18,3 +18,9 @@ export function generateStaffCode(): string {
   const n = crypto.randomInt(1000, 9999);
   return `STF-${n}`;
 }
+
+export function generatePackageRef(): string {
+  const n = crypto.randomInt(10000, 99999);
+  const t = Date.now().toString().slice(-5);
+  return `PKG-${t}${n}`;
+}

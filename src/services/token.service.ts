@@ -10,7 +10,24 @@ interface SignPublicOpts {
   role: Role;
 }
 
+interface SignRefreshOpts {
+  userId: string;
+  jti: string;
+  familyId: string;
+}
+
+interface RefreshPayload {
+  sub: string;
+  jti: string;
+  familyId: string;
+  iat: number;
+  exp: number;
+}
+
 export class TokenService {
+  /* ═══════════════════════════════════════════════════
+     PUBLIC (customer / staff) ACCESS
+  ═══════════════════════════════════════════════════ */
   static signPublicAccessToken(opts: SignPublicOpts): string {
     const jti = randomUUID();
     return jwt.sign(
@@ -20,6 +37,9 @@ export class TokenService {
     );
   }
 
+  /* ═══════════════════════════════════════════════════
+     ADMIN ACCESS
+  ═══════════════════════════════════════════════════ */
   static signAdminAccessToken(opts: { userId: string; sessionId: string; ip: string }): string {
     return jwt.sign(
       { sub: opts.userId, sessionId: opts.sessionId, ip: opts.ip, role: 'admin' },
@@ -28,7 +48,52 @@ export class TokenService {
     );
   }
 
-  /** Revoke a public access token until its natural expiry (default 15m). */
+  /* ═══════════════════════════════════════════════════
+     PUBLIC REFRESH (7d)
+  ═══════════════════════════════════════════════════ */
+  static signPublicRefreshToken(opts: SignRefreshOpts): string {
+    return jwt.sign(
+      { sub: opts.userId, jti: opts.jti, familyId: opts.familyId },
+      config.jwt.publicSecret,
+      { expiresIn: config.jwt.refreshTtl as any }
+    );
+  }
+
+  static verifyPublicRefreshToken(token: string): RefreshPayload | null {
+    try {
+      return jwt.verify(token, config.jwt.publicSecret) as RefreshPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     ADMIN REFRESH (7d)
+  ═══════════════════════════════════════════════════ */
+  static signAdminRefreshToken(opts: {
+    userId: string;
+    jti: string;
+    familyId: string;
+    ip: string;
+  }): string {
+    return jwt.sign(
+      { sub: opts.userId, jti: opts.jti, familyId: opts.familyId, ip: opts.ip },
+      config.jwt.adminSecret,
+      { expiresIn: config.jwt.refreshTtl as any }
+    );
+  }
+
+  static verifyAdminRefreshToken(token: string): RefreshPayload | null {
+    try {
+      return jwt.verify(token, config.jwt.adminSecret) as RefreshPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════
+     REVOCATION
+  ═══════════════════════════════════════════════════ */
   static async revokePublic(jti: string, ttlSeconds = 900): Promise<void> {
     await redis.set(`revoked:${jti}`, '1', 'EX', ttlSeconds);
   }

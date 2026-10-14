@@ -14,6 +14,7 @@ export const MEDIA_NAMESPACES = {
   QR_ARCHIVES: 'qr-archives',
   PRODUCTS: 'products',
   AVATARS: 'avatars',
+  PACKAGE_ITEMS: 'package-items',
 } as const;
 
 export const OTP_RESEND_WINDOW_SECONDS = 60;
