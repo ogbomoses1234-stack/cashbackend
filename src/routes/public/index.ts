@@ -18,7 +18,7 @@ import packageRoutes from './package.routes';
 
 const router = Router();
 
-router.use('/auth', authRoutes);
+router.use('/auth', authRoutes); 
 router.use('/otp', otpRoutes);
 router.use('/products', productRoutes);
 router.use('/categories', categoryRoutes);
