@@ -61,6 +61,7 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
   MAIL_FROM: z.string(),
+  ADMIN_NOTIFY_EMAIL: z.string().optional().default(''),
 
   PAYSTACK_SECRET_KEY: z.string().optional().default(''),
 
@@ -135,6 +136,7 @@ export const config = {
     user: parsed.data.SMTP_USER,
     pass: parsed.data.SMTP_PASS,
     from: parsed.data.MAIL_FROM,
+    adminNotifyEmail: parsed.data.ADMIN_NOTIFY_EMAIL || parsed.data.MAIL_FROM,
   },
 
   paystack: { secretKey: parsed.data.PAYSTACK_SECRET_KEY },

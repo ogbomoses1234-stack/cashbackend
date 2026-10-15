@@ -2,6 +2,14 @@ import { mailer } from '../config/mailer';
 import { config } from '../config';
 import { logger } from '../config/logger';
 
+function escapeHtml(s: string): string {
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)
+  );
+}
+
 const isDevNoSmtp =
   config.env === 'development' && !(config.mail.user && config.mail.pass);
 
@@ -127,6 +135,68 @@ export class EmailService {
         ? `<p>Your edit request for <b>#${reference}</b> was approved. You can now update the list.</p>`
         : `<p>Your edit request for <b>#${reference}</b> was declined. Check the chat for details.</p>`
     );
+  }
+
+  static async sendAdminAlert(opts: {
+    to: string;
+    kind: 'order' | 'package' | 'withdrawal';
+    title: string;
+    lines: Array<{ label: string; value: string }>;
+    ctaUrl?: string;
+    ctaLabel?: string;
+  }) {
+    const kindLabel =
+      opts.kind === 'order'
+        ? 'New order'
+        : opts.kind === 'package'
+        ? 'Special package request'
+        : 'Withdrawal request';
+
+    const accent = opts.kind === 'withdrawal' ? '#B45309' : '#0F766E';
+
+    const rows = opts.lines
+      .map(
+        (l) => `
+          <tr>
+            <td style="padding:8px 0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6B7280;width:38%;vertical-align:top">
+              ${escapeHtml(l.label)}
+            </td>
+            <td style="padding:8px 0;font-size:14px;color:#111827;line-height:1.5;vertical-align:top">
+              ${escapeHtml(l.value)}
+            </td>
+          </tr>`
+      )
+      .join('');
+
+    const cta = opts.ctaUrl
+      ? `<a href="${opts.ctaUrl}"
+           style="display:inline-block;margin-top:20px;padding:12px 22px;background:${accent};color:#fff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600">
+           ${escapeHtml(opts.ctaLabel ?? 'Open in dashboard')}
+         </a>`
+      : '';
+
+    const subject = `[QR CashBack] ${kindLabel} — ${opts.title}`;
+
+    const html = `
+      <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0B0F14">
+        <div style="display:inline-block;padding:4px 10px;background:${accent};color:#fff;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase">
+          ${escapeHtml(kindLabel)}
+        </div>
+        <h2 style="font-size:22px;margin:14px 0 8px;color:#0B0F14">${escapeHtml(opts.title)}</h2>
+        <p style="font-size:13px;color:#6B7280;margin:0 0 18px">
+          ${new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' })}
+        </p>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #E5E7EB;border-bottom:1px solid #E5E7EB">
+          ${rows}
+        </table>
+        ${cta}
+        <p style="font-size:12px;color:#9CA3AF;margin-top:28px">
+          You're receiving this because admin alerts are enabled in your QR CashBack settings.
+        </p>
+      </div>
+    `;
+
+    await this.send(opts.to, subject, html);
   }
 
 }

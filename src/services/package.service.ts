@@ -5,6 +5,7 @@ import { getPagination } from '../utils/pagination';
 import { generatePackageRef } from '../utils/generateSerial';
 import { StorageService } from './storage.service';
 import { EmailService } from './email.service';
+import { AdminAlertService } from './adminAlert.service';
 
 type Status =
   | 'draft' | 'submitted' | 'quoted' | 'approved'
@@ -257,6 +258,32 @@ export class PackageService {
       });
       return u;
     });
+
+    /* Notify admin — fire and forget */
+    prisma.userProfile
+      .findUnique({
+        where: { id: row.userId },
+        select: { fullName: true, email: true, phoneNumber: true },
+      })
+      .then((customer) => {
+        AdminAlertService.notify({
+          kind: 'package',
+          title: wasEditCycle
+            ? `Package ${updated.reference} re-submitted`
+            : `Package ${updated.reference}`,
+          lines: [
+            { label: 'Reference', value: updated.reference },
+            { label: 'Title', value: updated.title },
+            { label: 'Customer', value: customer?.fullName ?? customer?.email ?? row.userId },
+            { label: 'Phone', value: customer?.phoneNumber ?? '—' },
+            { label: 'Destination', value: `${updated.city}, ${updated.country}` },
+            { label: 'Items', value: String(updated.items.length) },
+          ],
+          ctaPath: `/packages/${updated.id}`,
+          ctaLabel: 'Review package',
+        }).catch(() => {});
+      })
+      .catch(() => {});
 
     return serializePackage(updated, { signImages: false });
   }

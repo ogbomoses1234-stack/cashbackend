@@ -6,6 +6,7 @@ import { toMoney } from '../utils/money';
 import { EmailService } from './email.service';
 import { PayoutService } from './payout.service';
 import { getPagination } from '../utils/pagination';
+import { AdminAlertService } from './adminAlert.service';
 
 /* ═══════════════════════════════════════════
    Nigerian bank code → name (fallback map)
@@ -65,7 +66,6 @@ export function enrichWithdrawalForAdmin(w: any): Record<string, unknown> {
   };
 }
 
-
 export class WithdrawalService {
   static async request(opts: {
     userId: string;
@@ -74,7 +74,13 @@ export class WithdrawalService {
     accountNumber: string;
     accountName: string;
   }) {
-    logger.info('withdrawal.request received', { userId: opts.userId, amount: opts.amount, bankCode: opts.bankCode, accountNumber: opts.accountNumber ? opts.accountNumber.slice(-4) : null });
+    logger.info('withdrawal.request received', {
+      userId: opts.userId,
+      amount: opts.amount,
+      bankCode: opts.bankCode,
+      accountNumber: opts.accountNumber ? opts.accountNumber.slice(-4) : null,
+    });
+
     const { userId, amount, bankCode, accountNumber, accountName } = opts;
     const naira = toMoney(amount);
 
@@ -85,7 +91,7 @@ export class WithdrawalService {
       );
     }
 
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       const user = await tx.userProfile.findUnique({ where: { id: userId } });
       if (!user) throw ApiError.notFound();
       if (user.walletBalance.lessThan(naira)) {
@@ -115,6 +121,28 @@ export class WithdrawalService {
 
       return request;
     });
+
+    /* Notify admin — fire and forget */
+    prisma.userProfile
+      .findUnique({ where: { id: userId }, select: { fullName: true, email: true } })
+      .then((customer) => {
+        AdminAlertService.notify({
+          kind: 'withdrawal',
+          title: `Withdrawal — NGN ${naira.toString()}`,
+          lines: [
+            { label: 'Amount', value: `NGN ${naira.toString()}` },
+            { label: 'Customer', value: customer?.fullName ?? customer?.email ?? userId },
+            { label: 'Bank', value: `${resolveBankName(bankCode)} (${bankCode})` },
+            { label: 'Account name', value: accountName },
+            { label: 'Account number', value: accountNumber },
+          ],
+          ctaPath: `/withdrawals/${created.id}`,
+          ctaLabel: 'Review withdrawal',
+        }).catch(() => {});
+      })
+      .catch(() => {});
+
+    return created;
   }
 
   static async listMine(userId: string) {

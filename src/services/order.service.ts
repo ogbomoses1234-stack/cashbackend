@@ -4,6 +4,7 @@ import { ApiError } from '../utils/ApiError';
 import { generateOrderNumber } from '../utils/generateSerial';
 import { getPagination } from '../utils/pagination';
 import { EmailService } from './email.service';
+import { AdminAlertService } from './adminAlert.service';
 
 interface CreateOrderInput {
   userId: string;
@@ -65,7 +66,7 @@ export class OrderService {
       return created;
     });
 
-    // Fire-and-forget email
+    // Fire-and-forget email to customer
     prisma.userProfile
       .findUnique({ where: { id: opts.userId }, select: { email: true } })
       .then((u) => {
@@ -74,6 +75,25 @@ export class OrderService {
         }
       })
       .catch(() => {});
+
+    // Notify admin — fire and forget
+    AdminAlertService.notify({
+      kind: 'order',
+      title: `Order ${order.orderNumber}`,
+      lines: [
+        { label: 'Order #', value: order.orderNumber },
+        { label: 'Total', value: `NGN ${order.totalAmount.toString()}` },
+        {
+          label: 'Payment',
+          value:
+            opts.paymentMethod === 'bank_transfer' ? 'Bank transfer' : 'Pay on delivery',
+        },
+        { label: 'Items', value: String(order.items.length) },
+        { label: 'Delivery', value: opts.deliveryAddress },
+      ],
+      ctaPath: `/orders/${order.id}`,
+      ctaLabel: 'Review order',
+    }).catch(() => {});
 
     return order;
   }
@@ -183,9 +203,17 @@ export class OrderService {
     });
 
     prisma.userProfile
-      .findUnique({ where: { id: order.userId }, select: { email: true } })
+      .findUnique({ where: { id: order.userId }, select: { email: true, fullName: true } })
       .then((u) => {
-        if (u?.email) EmailService.sendOrderStatus(u.email, order.orderNumber, 'Flagged').catch(() => {});
+        if (u?.email) {
+          EmailService.sendOrderFlagged({
+            to: u.email,
+            customerName: u.fullName ?? 'Customer',
+            orderNumber: order.orderNumber,
+            reason,
+            total: order.totalAmount.toString(),
+          }).catch(() => {});
+        }
       })
       .catch(() => {});
 
