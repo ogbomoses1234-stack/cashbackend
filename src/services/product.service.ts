@@ -43,8 +43,8 @@ export class ProductService {
       opts.sort === 'price_asc'
         ? { price: 'asc' }
         : opts.sort === 'price_desc'
-        ? { price: 'desc' }
-        : { createdAt: 'desc' };
+          ? { price: 'desc' }
+          : { createdAt: 'desc' };
 
     const [items, total] = await Promise.all([
       prisma.product.findMany({ where, orderBy, skip, take }),
@@ -82,7 +82,10 @@ export class ProductService {
     const slug = slugify(opts.title);
     const exists = await prisma.product.findUnique({ where: { slug } });
     if (exists) {
-      throw ApiError.conflict('PRODUCT_SLUG_TAKEN', 'A product with this title already exists');
+      throw ApiError.conflict(
+        'PRODUCT_SLUG_TAKEN',
+        'A product with this title already exists'
+      );
     }
 
     return prisma.product.create({
@@ -130,19 +133,46 @@ export class ProductService {
     });
   }
 
+  /**
+   * Delete a product — blocked if it has serials or appears in orders.
+   *
+   * Order history is a legal record and must stay intact. If a product
+   * has ever been ordered, the only safe action is to deactivate it
+   * (set isActive = false), which hides it from the customer catalog
+   * while preserving the database relations.
+   *
+   * Cart items are ephemeral — safe to clean up automatically.
+   */
   static async delete(id: string) {
     const product = await prisma.product.findUnique({ where: { id } });
     if (!product) throw ApiError.notFound('PRODUCT_NOT_FOUND', 'Product not found');
 
+    /* ─── Serials attached ────────────────────────────────── */
     const serialCount = await prisma.productSerial.count({
       where: { productId: id },
     });
     if (serialCount > 0) {
       throw ApiError.conflict(
         'PRODUCT_HAS_SERIALS',
-        `Cannot delete: ${serialCount} serials are attached to this product`
+        `Cannot delete: ${serialCount} serial${serialCount === 1 ? '' : 's'} attached. ` +
+          `Deactivate the product instead to hide it from customers.`
       );
     }
+
+    /* ─── Appears in customer orders ──────────────────────── */
+    const orderItemCount = await prisma.orderItem.count({
+      where: { productId: id },
+    });
+    if (orderItemCount > 0) {
+      throw ApiError.conflict(
+        'PRODUCT_HAS_ORDERS',
+        `Cannot delete: this product appears in ${orderItemCount} customer order${orderItemCount === 1 ? '' : 's'}. ` +
+          `Deactivate it instead — the product disappears from the catalog but order history is preserved.`
+      );
+    }
+
+    /* ─── Cart items are ephemeral — clean them up ─────────── */
+    await prisma.cartItem.deleteMany({ where: { productId: id } });
 
     await prisma.product.delete({ where: { id } });
     return { deleted: true };
